@@ -2,7 +2,8 @@
 
 Runs on Linux (tested on Ubuntu 24.04 with GNOME on Wayland; KDE Plasma,
 Sway and Hyprland are in testing, see [Linux desktops](#linux-desktops))
-and on Windows 10/11. macOS follows (see `docs/PLAN.md`).
+and on Windows 10/11. macOS is in testing (built from source, see
+[macOS](#macos)).
 
 ## Install
 
@@ -76,6 +77,28 @@ The packages land in `target/release/bundle/deb` and
 `target/release/bundle/appimage`. On Windows (with the Rust MSVC
 toolchain), `cargo tauri build --bundles nsis` builds the installer in
 `target/release/bundle/nsis`.
+
+### macOS
+
+Needs the Xcode command line tools (`xcode-select --install`) and Rust
+(rustup). There is no signed release yet; the app is built locally:
+
+```sh
+cargo install tauri-cli --version "~2.12.4" --locked
+cd client
+cargo tauri build --bundles app
+cp -R target/release/bundle/macos/SCRN.app /Applications/
+```
+
+The app lives in the menu bar, without a Dock icon. The shortcut is
+Cmd+Shift+2 by default (Cmd+Shift+3 to 6 belong to macOS). The first
+capture asks for the screen recording permission (System Settings →
+Privacy & Security → Screen & System Audio Recording); without it the
+capture shows only the desktop background. Grant it to `SCRN` and start
+the app again. A rebuilt app counts as a new app for this permission, so
+it may have to be granted again after each build. Autostart and the
+self-update are not available on macOS yet; the update entry in the tray
+opens the release page.
 
 Release builds (`.github/workflows/client-release.yml`) add
 `--config tauri.release.conf.json`, which signs every package for the

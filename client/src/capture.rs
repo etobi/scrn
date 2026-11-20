@@ -1,8 +1,8 @@
 //! Screen capture and cropping of the selection. Linux asks the screenshot
 //! portal, or `grim` on wlroots compositors whose portal cannot; Windows
-//! captures every monitor with xcap and puts the images together. Either
-//! way the result covers the bounding box of all monitors in physical
-//! pixels.
+//! and macOS capture every monitor with xcap and put the images together.
+//! Either way the result covers the bounding box of all monitors in
+//! physical pixels.
 
 use std::path::PathBuf;
 
@@ -125,14 +125,14 @@ async fn grim() -> Result<(Capture, String), CaptureError> {
 }
 
 /// Captures all screens. Returns the capture and a note for the log.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub async fn take() -> Result<(Capture, String), CaptureError> {
     tokio::task::spawn_blocking(capture_monitors)
         .await
         .map_err(|e| CaptureError::Screen(e.to_string()))?
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub async fn take() -> Result<(Capture, String), CaptureError> {
     Err(CaptureError::Screen(
         "not supported on this system yet".into(),
@@ -162,8 +162,87 @@ fn capture_monitors() -> Result<(Capture, String), CaptureError> {
     Ok((compose(&parts)?, note))
 }
 
+/// macOS places monitors in points and captures each one at its own scale
+/// factor, e.g. 2 for a Retina display next to an external one at 1. The
+/// images are brought to the largest factor, so they share one pixel grid;
+/// the overlays map their monitors the same way (see `source_rect`).
+#[cfg(target_os = "macos")]
+fn capture_monitors() -> Result<(Capture, String), CaptureError> {
+    let screen = |e: xcap::XCapError| CaptureError::Screen(e.to_string());
+    let mut shots = Vec::new();
+    for monitor in xcap::Monitor::all().map_err(screen)? {
+        let (x, y) = (monitor.x().map_err(screen)?, monitor.y().map_err(screen)?);
+        let scale = f64::from(monitor.scale_factor().map_err(screen)?);
+        let image = monitor.capture_image().map_err(screen)?;
+        shots.push((x, y, scale, image));
+    }
+    let target = shots.iter().map(|s| s.2).fold(1.0, f64::max);
+    let scaled: Vec<_> = shots
+        .iter()
+        .map(|(x, y, scale, image)| {
+            let (rgba, width, height) = upscale(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                target / scale,
+            );
+            (
+                to_pixels(*x, target),
+                to_pixels(*y, target),
+                rgba,
+                width,
+                height,
+            )
+        })
+        .collect();
+    let parts: Vec<Part<'_>> = scaled
+        .iter()
+        .map(|(x, y, rgba, width, height)| Part {
+            x: *x,
+            y: *y,
+            width: *width,
+            height: *height,
+            rgba,
+        })
+        .collect();
+    let note = format!("xcap, {} monitors, scale {target}", parts.len());
+    Ok((compose(&parts)?, note))
+}
+
+/// A position in points as pixels at `scale`.
+#[cfg(any(target_os = "macos", test))]
+fn to_pixels(points: i32, scale: f64) -> i32 {
+    (f64::from(points) * scale).round() as i32
+}
+
+/// Enlarges 8-bit RGBA rows by `factor` (at least 1, nearest neighbour).
+/// Returns the image unchanged when there is nothing to enlarge.
+#[cfg(any(target_os = "macos", test))]
+fn upscale(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    factor: f64,
+) -> (std::borrow::Cow<'_, [u8]>, u32, u32) {
+    let size = |v: u32| (f64::from(v) * factor).round() as u32;
+    let (new_width, new_height) = (size(width), size(height));
+    if factor <= 1.0 || (new_width, new_height) == (width, height) {
+        return (std::borrow::Cow::Borrowed(rgba), width, height);
+    }
+    let mut out = Vec::with_capacity(new_width as usize * new_height as usize * 4);
+    for y in 0..new_height {
+        let src_y = ((f64::from(y) / factor) as u32).min(height - 1) as usize;
+        for x in 0..new_width {
+            let src_x = ((f64::from(x) / factor) as u32).min(width - 1) as usize;
+            let start = (src_y * width as usize + src_x) * 4;
+            out.extend_from_slice(&rgba[start..start + 4]);
+        }
+    }
+    (std::borrow::Cow::Owned(out), new_width, new_height)
+}
+
 /// One monitor image at its position on the virtual desktop.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 pub struct Part<'a> {
     pub x: i32,
     pub y: i32,
@@ -175,7 +254,7 @@ pub struct Part<'a> {
 
 /// Puts monitor images together into one PNG covering their bounding box.
 /// Gaps between monitors stay black.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 pub fn compose(parts: &[Part<'_>]) -> Result<Capture, CaptureError> {
     let no_image = || CaptureError::Screen("no monitor image".into());
     let left = parts
@@ -412,6 +491,53 @@ mod tests {
         assert_eq!(px(2, 0), [0, 30, 0, 255]);
         assert_eq!(px(2, 1), [0, 40, 0, 255]);
         assert_eq!(px(0, 1), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn mixed_scale_monitors_do_not_overlap() {
+        // A Retina display (2x2 points, scale 2) left of an external one
+        // (1x1 point at x = 2, scale 1). In pixels at scale 2 the external
+        // image starts at x = 4 and is enlarged to 2x2.
+        let retina = [[1u8, 0, 0, 255]; 16].concat();
+        let external = [0u8, 2, 0, 255];
+        let (big, width, height) = upscale(&external, 1, 1, 2.0);
+        assert_eq!((width, height), (2, 2));
+        let parts = [
+            Part {
+                x: to_pixels(0, 2.0),
+                y: 0,
+                width: 4,
+                height: 4,
+                rgba: &retina,
+            },
+            Part {
+                x: to_pixels(2, 2.0),
+                y: 0,
+                width,
+                height,
+                rgba: &big,
+            },
+        ];
+        let capture = compose(&parts).unwrap();
+        assert_eq!((capture.width, capture.height), (6, 4));
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(&capture.png[..]));
+        decoder.set_transformations(png::Transformations::normalize_to_color8());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buffer = vec![0; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut buffer).unwrap();
+        let px = |x: usize, y: usize| &buffer[(y * 6 + x) * 4..(y * 6 + x) * 4 + 4];
+        assert_eq!(px(3, 0), [1, 0, 0, 255]);
+        assert_eq!(px(4, 0), [0, 2, 0, 255]);
+        assert_eq!(px(5, 1), [0, 2, 0, 255]);
+        assert_eq!(px(4, 2), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn upscale_keeps_images_at_the_target_scale() {
+        let rgba = [7u8, 8, 9, 255];
+        let (same, width, height) = upscale(&rgba, 1, 1, 1.0);
+        assert!(matches!(same, std::borrow::Cow::Borrowed(_)));
+        assert_eq!((width, height), (1, 1));
     }
 
     #[test]

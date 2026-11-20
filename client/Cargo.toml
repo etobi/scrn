@@ -48,11 +48,14 @@ futures-util = { version = "0.3.34", default-features = false }
 # own monitor (Wayland ignores window positions).
 gtk = "0.18.2"
 
-[target.'cfg(windows)'.dependencies]
-# Screen capture of all monitors (DXGI / GDI).
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+# Screen capture of all monitors (DXGI / GDI on Windows, CoreGraphics on
+# macOS).
 xcap = { version = "0.9.8", default-features = false }
-# Print Screen as global shortcut.
+# Print Screen (Windows) or Cmd+Shift+2 (macOS) as global shortcut.
 tauri-plugin-global-shortcut = "2.4.1"
+
+[target.'cfg(windows)'.dependencies]
 # Autostart entry and taskbar theme; already pulled in by Tauri.
 windows-registry = "0.6.1"
 

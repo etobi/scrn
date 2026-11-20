@@ -1,6 +1,7 @@
 //! The keyboard shortcut for a screenshot on Windows (`PrintScreen` by
-//! default). Linux desktops call `scrn capture` from their own shortcut
-//! settings instead; GNOME on Wayland gives apps no global shortcuts.
+//! default) and macOS (`Super+Shift+2`, i.e. Cmd+Shift+2). Linux desktops
+//! call `scrn capture` from their own shortcut settings instead; GNOME on
+//! Wayland gives apps no global shortcuts.
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};

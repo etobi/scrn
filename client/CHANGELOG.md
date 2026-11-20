@@ -5,6 +5,14 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- macOS (built from source, see the README): captures all monitors, also
+  a Retina display next to one at scale 1; Cmd+Shift+2 as default
+  shortcut; lives in the menu bar without a Dock icon; links and
+  notifications. Not yet on macOS: autostart, signed packages and the
+  self-update (the update entry opens the release page).
+
 ## [0.3.0] - 2026-11-14
 
 Install this release by hand once; from here on the client updates

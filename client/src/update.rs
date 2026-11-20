@@ -109,9 +109,10 @@ async fn check(app: &AppHandle) {
 }
 
 /// Whether this client can replace itself: only an installed package
-/// knows its bundle type.
+/// knows its bundle type. Releases have no macOS package yet, so a Mac
+/// gets the release page instead.
 pub fn can_install() -> bool {
-    tauri::utils::platform::bundle_type().is_some()
+    !cfg!(target_os = "macos") && tauri::utils::platform::bundle_type().is_some()
 }
 
 /// Set while an update downloads, so a second click does not start another.

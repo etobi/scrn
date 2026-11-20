@@ -55,7 +55,7 @@ pub struct Settings {
     pub autostart: bool,
     /// Keyboard shortcut for a screenshot, e.g. `PrintScreen` or
     /// `Ctrl+Shift+S`; empty for none. Only used where the client
-    /// registers shortcuts itself (Windows); on Linux the desktop's own
+    /// registers shortcuts itself (Windows, macOS); on Linux the desktop's own
     /// shortcut settings call `scrn capture`.
     pub shortcut: String,
     /// Look for a newer client release on GitHub once a day.
@@ -76,7 +76,11 @@ impl Default for Settings {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 pub const DEFAULT_SHORTCUT: &str = "PrintScreen";
+/// Macs have no Print Screen key; Cmd+Shift+3 to 6 belong to the system.
+#[cfg(target_os = "macos")]
+pub const DEFAULT_SHORTCUT: &str = "Super+Shift+2";
 
 impl Settings {
     pub fn is_configured(&self) -> bool {

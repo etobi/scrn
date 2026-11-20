@@ -14,6 +14,8 @@ const testButton = document.getElementById("test");
 const forgetButton = document.getElementById("forget");
 const testResult = document.getElementById("test-result");
 const expiry = document.getElementById("expiry");
+// Placeholder of the shortcut field, from the system's default shortcut.
+let defaultShortcut = "PrintScreen";
 const status = document.getElementById("status");
 
 const show = (el, text, kind = "") => {
@@ -56,6 +58,8 @@ const fill = (view) => {
   insecure.hidden = !isInsecure(s.server_url);
   document.getElementById("shortcut-field").hidden = !view.shortcut_supported;
   document.getElementById("shortcut").value = s.shortcut;
+  defaultShortcut = view.default_shortcut;
+  document.getElementById("shortcut").placeholder = defaultShortcut;
   document.getElementById("shortcut-error").textContent = view.shortcut_error
     ? t("settings.shortcut_failed", view.shortcut_error)
     : "";
@@ -167,7 +171,7 @@ const stopRecording = (value) => {
   window.removeEventListener("blur", cancelRecording);
   recording = null;
   shortcutInput.classList.remove("recording");
-  shortcutInput.placeholder = "PrintScreen";
+  shortcutInput.placeholder = defaultShortcut;
   shortcutInput.readOnly = false;
   if (value !== undefined) shortcutInput.value = value;
   invoke("resume_shortcut").catch(() => {});

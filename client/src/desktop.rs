@@ -98,6 +98,17 @@ pub fn open_url(app: &AppHandle, url: String) {
             report::note(format!("opening a link failed: {err}"));
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        // The URL is one argument, so no shell quoting is involved.
+        if let Err(err) = std::process::Command::new("/usr/bin/open")
+            .arg(&url)
+            .spawn()
+        {
+            report::note(format!("opening a link failed: {err}"));
+        }
+    }
 }
 
 /// Shows a desktop notification; failures only go to the log.
@@ -117,11 +128,23 @@ pub fn notify(summary: &str, body: &str) {
             }
         });
     }
-    #[cfg(windows)]
+    #[cfg(not(target_os = "linux"))]
     {
         // The installer registers this ID with the Start menu shortcut, so
         // the toast shows the SCRN name and icon.
+        #[cfg(windows)]
         notification.app_id(APP_ID);
+        // macOS shows the notification under the app with this bundle ID;
+        // it can be set only once per process.
+        #[cfg(target_os = "macos")]
+        {
+            static BUNDLE: std::sync::Once = std::sync::Once::new();
+            BUNDLE.call_once(|| {
+                if let Err(err) = notify_rust::set_application(APP_ID) {
+                    report::note(format!("notification app not set: {err}"));
+                }
+            });
+        }
         let notification = notification.clone();
         tauri::async_runtime::spawn_blocking(move || {
             if let Err(err) = notification.show() {
@@ -131,8 +154,9 @@ pub fn notify(summary: &str, body: &str) {
     }
 }
 
-/// The identifier from `tauri.conf.json`, used as AppUserModelID.
-#[cfg(windows)]
+/// The identifier from `tauri.conf.json`: the AppUserModelID on Windows,
+/// the bundle ID on macOS.
+#[cfg(not(target_os = "linux"))]
 const APP_ID: &str = "de.andreaslink.scrn";
 
 /// True if the Windows taskbar uses the light theme, so the tray needs the

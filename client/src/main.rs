@@ -26,7 +26,7 @@ mod report;
 mod secret;
 #[cfg(target_os = "linux")]
 mod session;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod shortcut;
 mod update;
 
@@ -152,7 +152,7 @@ fn main() {
     };
 
     let builder = tauri::Builder::default();
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let builder = builder.plugin(shortcut::plugin());
     let result = builder
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -186,9 +186,12 @@ fn main() {
             note
         ])
         .setup(move |app| {
+            // A tray app: no Dock icon and no menu bar of its own.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             build_tray(app.handle())?;
             log_monitors(app.handle());
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             shortcut::apply(app.handle());
             #[cfg(target_os = "linux")]
             portal_shortcuts::start(app.handle());
@@ -894,6 +897,11 @@ fn overlay_info(
         .strip_prefix(OVERLAY)
         .and_then(|i| i.parse::<usize>().ok())
         .unwrap_or(0);
+    // Tauri gives each Mac monitor in its own pixels; the capture puts them
+    // together in points at one scale, so the overlays map them in points.
+    #[cfg(target_os = "macos")]
+    let source = source_rect(&in_points(&monitors), index, image_width, image_height);
+    #[cfg(not(target_os = "macos"))]
     let source = source_rect(&monitors, index, image_width, image_height);
     report::note(format!(
         "overlay {index}: window inner={:?} scale={:?} current monitor={:?} source={source:?}",
@@ -912,6 +920,27 @@ fn overlay_info(
         monitor: monitors.get(index).cloned(),
         monitors,
     })
+}
+
+/// The monitors with position and size in points instead of their own
+/// pixels.
+#[cfg(any(target_os = "macos", test))]
+fn in_points(monitors: &[MonitorInfo]) -> Vec<MonitorInfo> {
+    let points = |v: f64, scale: f64| (v / scale).round();
+    monitors
+        .iter()
+        .map(|m| {
+            let scale = if m.scale > 0.0 { m.scale } else { 1.0 };
+            MonitorInfo {
+                x: points(f64::from(m.x), scale) as i32,
+                y: points(f64::from(m.y), scale) as i32,
+                width: points(f64::from(m.width), scale) as u32,
+                height: points(f64::from(m.height), scale) as u32,
+                scale: 1.0,
+                ..m.clone()
+            }
+        })
+        .collect()
 }
 
 /// The part of the portal image that shows monitor `index`.
@@ -1086,7 +1115,7 @@ fn open_settings(app: &AppHandle) -> tauri::Result<()> {
         .focused(true)
         .build()?;
     // Closed while recording a shortcut: register the saved one again.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let app = app.clone();
         window.on_window_event(move |event| {
@@ -1095,7 +1124,7 @@ fn open_settings(app: &AppHandle) -> tauri::Result<()> {
             }
         });
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = window;
     Ok(())
 }
@@ -1107,6 +1136,8 @@ struct SettingsView {
     insecure: bool,
     /// True where the client registers its own keyboard shortcut.
     shortcut_supported: bool,
+    /// The shortcut of this system when nothing else is set.
+    default_shortcut: &'static str,
     shortcut_error: Option<String>,
     version: &'static str,
     config_path: String,
@@ -1130,7 +1161,8 @@ async fn settings_view(app: &AppHandle, settings: Settings) -> Result<SettingsVi
         |p: Option<std::path::PathBuf>| p.map_or_else(String::new, |p| p.display().to_string());
     Ok(SettingsView {
         insecure: config::is_insecure(&settings.server_url),
-        shortcut_supported: cfg!(windows),
+        shortcut_supported: cfg!(any(windows, target_os = "macos")),
+        default_shortcut: config::DEFAULT_SHORTCUT,
         shortcut_error: lock(&app.state::<AppState>().shortcut_error).clone(),
         version: VERSION,
         settings,
@@ -1228,7 +1260,7 @@ async fn save_settings(
     if check_now {
         update::check_soon(&app);
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     shortcut::apply(&app);
     settings_view(&app, settings).await
 }
@@ -1276,18 +1308,18 @@ async fn forget_token(
 /// the keys reach the window.
 #[tauri::command]
 fn pause_shortcut(app: AppHandle) {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     shortcut::release(&app);
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = app;
 }
 
 /// Registers the saved keyboard shortcut again after recording.
 #[tauri::command]
 fn resume_shortcut(app: AppHandle) {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     shortcut::apply(&app);
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = app;
 }
 
@@ -1328,6 +1360,31 @@ mod tests {
         assert_eq!(
             (right.x, right.y, right.width, right.height),
             (3440, 0, 1920, 1080)
+        );
+    }
+
+    #[test]
+    fn source_rect_maps_mixed_scale_monitors_in_points() {
+        // A Retina display (1440x900 points, scale 2) left of an external
+        // one (1920x1080, scale 1), as Tauri reports them on macOS: each in
+        // its own pixels. The capture covers 3360x1080 points at scale 2.
+        let monitors = [
+            MonitorInfo {
+                scale: 2.0,
+                ..monitor(0, 0, 2880, 1800)
+            },
+            monitor(1440, 0, 1920, 1080),
+        ];
+        let points = in_points(&monitors);
+        let left = source_rect(&points, 0, 6720, 2160);
+        assert_eq!(
+            (left.x, left.y, left.width, left.height),
+            (0, 0, 2880, 1800)
+        );
+        let right = source_rect(&points, 1, 6720, 2160);
+        assert_eq!(
+            (right.x, right.y, right.width, right.height),
+            (2880, 0, 3840, 2160)
         );
     }
 

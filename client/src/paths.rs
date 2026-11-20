@@ -1,10 +1,13 @@
 //! Where the client keeps its files.
 //!
-//! | What | Linux | Windows |
-//! |------|-------|---------|
-//! | settings | `$XDG_CONFIG_HOME/scrn/config.json` | `%APPDATA%\SCRN\config.json` |
-//! | history, log | `$XDG_STATE_HOME/scrn/` | `%LOCALAPPDATA%\SCRN\` |
-//! | saved images | `SCRN` in `XDG_PICTURES_DIR` (`~/.config/user-dirs.dirs`) | `SCRN` in the Pictures known folder |
+//! | What | Linux | Windows | macOS |
+//! |------|-------|---------|-------|
+//! | settings | `$XDG_CONFIG_HOME/scrn/config.json` | `%APPDATA%\SCRN\config.json` | `~/.config/scrn/config.json` |
+//! | history, log | `$XDG_STATE_HOME/scrn/` | `%LOCALAPPDATA%\SCRN\` | `~/.local/state/scrn/` |
+//! | saved images | `SCRN` in `XDG_PICTURES_DIR` (`~/.config/user-dirs.dirs`) | `SCRN` in the Pictures known folder | `~/Pictures/SCRN` |
+//!
+//! macOS takes the Linux paths (the XDG variables count there too), so
+//! settings and log are where the Linux documentation says.
 //!
 //! The pictures folder has a localized name, such as `~/Bilder`, and on
 //! Windows it may be moved, e.g. into OneDrive; the system says where.
