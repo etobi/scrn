@@ -801,8 +801,20 @@ fn show_overlay(
         window.set_position(*m.position())?;
         window.set_size(*m.size())?;
     }
-    window.set_fullscreen(true)?;
-    window.show()?;
+    // Native fullscreen on macOS leaves the overlay a window with a title
+    // bar; the simple one covers menu bar and Dock without a new Space. It
+    // sizes the window to the screen the window is on, which a hidden
+    // window may not have yet, so the window shows first.
+    #[cfg(target_os = "macos")]
+    {
+        window.show()?;
+        window.set_simple_fullscreen(true)?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.set_fullscreen(true)?;
+        window.show()?;
+    }
     if index == 0 {
         window.set_focus()?;
     }
@@ -818,7 +830,26 @@ fn overlays(app: &AppHandle) -> Vec<WebviewWindow> {
 }
 
 fn close_overlays(app: &AppHandle) {
-    for window in overlays(app) {
+    let windows = overlays(app);
+    // Simple fullscreen hides menu bar and Dock for the whole app until it
+    // is turned off, and each window restores what was set when it turned
+    // it on. Undone in reverse order, the first overlay restores the state
+    // from before the capture.
+    #[cfg(target_os = "macos")]
+    let windows = {
+        let mut windows = windows;
+        windows.sort_by_key(|w| {
+            std::cmp::Reverse(
+                w.label()
+                    .strip_prefix(OVERLAY)
+                    .and_then(|i| i.parse::<usize>().ok()),
+            )
+        });
+        windows
+    };
+    for window in windows {
+        #[cfg(target_os = "macos")]
+        let _ = window.set_simple_fullscreen(false);
         let _ = window.close();
     }
 }
